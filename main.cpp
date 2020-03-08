@@ -11,33 +11,32 @@ typedef complex<double> complexd;
 complexd* createq(int n) {
     unsigned long long leng = 1 << n, i;
     complexd *A = new complexd[leng];
-    unsigned int seed = omp_get_wtime(), wpart;
+    double sum = 0;
+    unsigned int seed = omp_get_wtime();
     int sign;   
-    #pragma omp parallel for shared(A, leng) private(i) firstprivate(seed)
+    #pragma omp parallel for shared(A) firstprivate(seed)
     for (i = 0; i < leng; i++) {
         seed = omp_get_wtime();
         sign = 1;
-        wpart = rand_r(&seed);
-        if ((wpart / (float) RAND_MAX) < 0.5) {
-            sign = -1;
-        }
-        A[i].real(sign * (wpart + rand_r(&seed) / (float) RAND_MAX));
-        
-        sign = 1;
-        wpart = rand_r(&seed);
-        if ((wpart / (float) RAND_MAX) < 0.5) {
-            sign = -1;
-        }
-        A[i].imag(sign * (wpart + rand_r(&seed) / (float) RAND_MAX));
+        if ((rand_r(&seed) / (float) RAND_MAX) < 0.5) sign = -1;
+        if ((wpart / (float) RAND_MAX) < 0.5) sign = -1;
+        A[i].real(sign * (rand_r(&seed) / (float) RAND_MAX));
+        A[i].imag(sign * (rand_r(&seed) / (float) RAND_MAX));
+        sum += abs(A[i] * A[i]);
+    }
+    sum = sqrt(sum);
+    #pragma omp parallel for 
+    for (i = 0; i < leng; i++) {
+        A[i] = A[i] / sum;
     }
     return A;
 }
 
 complexd* qubit_transform(complexd* A, int n, complexd* H, int k) {
-    unsigned long long  leng = 1LLU << n, ik = 1LLU<< (n - k);
+    unsigned long long i, leng = 1 << n, ik = 1 << (n - k);
     complexd *B = new complexd[leng];
-    #pragma omp parallel for shared(A, B, H, leng, ik)
-        for (unsigned long long i = 0; i < leng; i++) {
+    #pragma omp parallel for shared(B)
+        for (i = 0; i < leng; i++) {
             int num = i & ik;
             switch (num) {
             case 0:
@@ -60,6 +59,7 @@ int main(int argc, char **argv) {
     int n, k;
     n = atoi(argv[1]);
     k = atoi(argv[2]);
+    if (n < k) return 1;
     complexd *A = createq(n);
     complexd H[] = {1/sqrt(2), 1/sqrt(2), 1/sqrt(2), -1/sqrt(2)};
 

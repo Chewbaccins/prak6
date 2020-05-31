@@ -147,7 +147,7 @@ int main(int argc, char **argv) {
     qubit_transform(input_buf, U, seg_leng, k, recv_buf, rank);
     double end = MPI_Wtime();
     if (rank == 0) {
-        std::cout << "The process took " << end - begin << " seconds to run." << std::endl;
+        std::cout << "Time " << end - begin << " seconds\n" << std::endl;
     }
     write(output, recv_buf, n, rank);
     MPI_Finalize();

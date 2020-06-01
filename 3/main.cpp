@@ -106,6 +106,39 @@ qubit_transform(complexd *buf_zone, complexd U[2][2], unsigned long long seg_len
     }
 }
 
+void
+qubit_transform2(complexd *buf_zone, complexd **U, unsigned long long seg_leng, unsigned int k, 
+                complexd *recv_zone, int rank) {
+    unsigned first_index = rank * seg_leng;
+    int rank_neighbor = first_index ^(1u << (k - 1));
+    rank_neighbor /= seg_leng;
+    if (rank != rank_neighbor) {
+        MPI_Sendrecv(buf_zone, seg_leng, MPI_DOUBLE_COMPLEX, rank_neighbor, 0, recv_zone, seg_leng, MPI_DOUBLE_COMPLEX,
+                    rank_neighbor, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        if (rank > rank_neighbor) {
+#pragma omp parallel for schedule(static) shared(recv_zone, buf_zone, U)
+            for (unsigned long long i = 0; i < seg_leng; i++) {
+                recv_zone[i] = U[1][0] * recv_zone[i] + U[1][1] * buf_zone[i];
+            }
+        } else {
+#pragma omp parallel for schedule(static) shared(recv_zone, buf_zone, U)
+            for (unsigned long long i = 0; i < seg_leng; i++) {
+                recv_zone[i] = U[0][0] * buf_zone[i] + U[0][1] * recv_zone[i];
+            }
+        }
+    } else {
+        unsigned shift = (int) log2(seg_leng) - k;
+        unsigned pow = 1u << (shift);
+#pragma omp parallel for schedule(static) shared(recv_zone, buf_zone, U)
+        for (std::size_t i = 0; i < seg_leng; i++) {
+            unsigned i0 = i & ~pow;
+            unsigned i1 = i | pow;
+            unsigned iq = (i & pow) >> shift;
+            recv_zone[i] = U[iq][0] * buf_zone[i0] + U[iq][1] * buf_zone[i1];
+        }
+    }
+}
+
 double normal_dis_gen()
 {
     double S = 0.;
@@ -113,7 +146,7 @@ double normal_dis_gen()
     return S - 6.0;
 }
 
-void add_noise(complexd U[2][2], complexd V[2][2], double tet) {
+void add_noise(complexd U[2][2], complexd **V, double tet) {
     V[0][0] = U[0][0] * cos(tet) - U[0][1] * sin(tet);
     V[0][1] = U[0][0] * sin(tet) + U[0][1] * cos(tet);
     V[1][0] = U[1][0] * cos(tet) - U[1][1] * sin(tet);
@@ -185,7 +218,9 @@ int main(int argc, char **argv) {
     //noise
     double noise_time = 0;
     for (unsigned qubit = 1; qubit < n + 1; qubit++) {
-        complexd U_changed[2][2];
+        complexd **U_changed = new complexd*[2];
+        U_changed[0] = new complexd[2];
+        U_changed[1] = new complexd[2];
         double tet = 0;
         if (rank == 0) {
             tet = normal_dis_gen() * eps;
@@ -193,9 +228,11 @@ int main(int argc, char **argv) {
         MPI_Bcast(&tet, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
         add_noise(U, U_changed, tet);
         begin = MPI_Wtime();
-        qubit_transform(input_buf, U, seg_leng, qubit, noise_buf, rank);
+        qubit_transform2(input_buf, U_changed, seg_leng, qubit, noise_buf, rank);
         end = MPI_Wtime();
         noise_time += end - begin;
+        delete[] *U_changed;
+        delete[] U_changed;
     }
     if (rank == 0) {
         std::cout << "Noise time " << noise_time << " seconds\n";
